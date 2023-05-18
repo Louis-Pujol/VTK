@@ -19,3 +19,7 @@ project.xcworkspace
 # Exclude Visual Studio stuff
 .vs*
 CMakeSettings.json
+
+# Exclude build and tmp folder
+build/
+tmp/

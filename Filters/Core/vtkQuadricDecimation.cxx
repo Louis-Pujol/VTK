@@ -252,6 +252,16 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   const vtkIdType* pts;
   vtkIdType numDeletedTris = 0;
 
+  // Create arrays to store the collapse history and the new points
+  int n_collapses;
+  n_collapses = numPts - 1; // maximum number of collapses (TODO - make this more accurate)
+  this->collapses_history = new int[2 * n_collapses];
+  for (j = 0; j < 2 * n_collapses; j++)
+  {
+    collapses_history[j] = -1;
+  }
+  this->new_points = new double[3 * n_collapses];
+
   // check some assumptions about the data
   if (input->GetPolys() == nullptr || input->GetPoints() == nullptr ||
     input->GetPointData() == nullptr || input->GetFieldData() == nullptr)
@@ -395,6 +405,12 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
       edgeId = this->EdgeCosts->Pop(0, cost);
       continue;
     }
+
+    this->collapses_history[2 * this->NumberOfEdgeCollapses] = endPtIds[0];
+    this->collapses_history[2 * this->NumberOfEdgeCollapses + 1] = endPtIds[1];
+    this->new_points_history[3 * this->NumberOfEdgeCollapses] = x[0];
+    this->new_points_history[3 * this->NumberOfEdgeCollapses + 1] = x[1];
+    this->new_points_history[3 * this->NumberOfEdgeCollapses + 2] = x[2];
 
     this->NumberOfEdgeCollapses++;
 
