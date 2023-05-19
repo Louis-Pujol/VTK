@@ -40,23 +40,20 @@
 // toggling on and off sets it to 1 and 0
 
 #include "vtkQuadricDecimation.h"
-#include "vtkCellArray.h"
-#include "vtkCellData.h"
-#include "vtkDoubleArray.h"
-#include "vtkEdgeTable.h"
+#include "vtkCellArray.h" //
+#include "vtkCellData.h" // unused
+#include "vtkDoubleArray.h" //
+#include "vtkEdgeTable.h" //
 #include "vtkGenericCell.h"
-#include "vtkIdList.h"
-#include "vtkInformation.h"
-#include "vtkInformationVector.h"
-#include "vtkMath.h"
-#include "vtkObjectFactory.h"
-#include "vtkPointData.h"
-#include "vtkPolyData.h"
-#include "vtkPriorityQueue.h"
-#include "vtkTriangle.h"
-
-#include <iostream>
-#include <fstream>
+#include "vtkIdList.h" //
+#include "vtkInformation.h" //
+#include "vtkInformationVector.h" //
+#include "vtkMath.h" //
+#include "vtkObjectFactory.h" // unused
+#include "vtkPointData.h" //
+#include "vtkPolyData.h" 
+#include "vtkPriorityQueue.h" // 
+#include "vtkTriangle.h" // unused
 
 VTK_ABI_NAMESPACE_BEGIN
 vtkStandardNewMacro(vtkQuadricDecimation);
@@ -232,12 +229,6 @@ void vtkQuadricDecimation::GetPointAttributeArray(vtkIdType ptId, double* x)
 int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   vtkInformationVector** inputVector, vtkInformationVector* outputVector)
 {
-
-  std::ofstream myfile;
-  myfile.open("/home/louis/decimation.txt");
-  myfile << "You are working with a custom version of quadric Decimation.\n";
-  myfile.close();
-
   // get the info objects
   vtkInformation* inInfo = inputVector[0]->GetInformationObject(0);
   vtkInformation* outInfo = outputVector->GetInformationObject(0);
@@ -269,7 +260,7 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   {
     collapses_history[j] = -1;
   }
-  this->new_points_history = new double[3 * n_collapses];
+  this->new_points = new double[3 * n_collapses];
 
   // check some assumptions about the data
   if (input->GetPolys() == nullptr || input->GetPoints() == nullptr ||
@@ -440,23 +431,6 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
 
   vtkDebugMacro(<< "Number Of Edge Collapses: " << this->NumberOfEdgeCollapses
                 << " Cost: " << cost);
-
-  // Save the decimation history
-
-  std::ofstream file1, file2;
-  file1.open("/home/louis/collapses_history");
-  file2.open("/home/louis/new_points_history");
-
-  for(int count = 0; count < 2 * n_collapses; count ++){
-            file1 << collapses_history[count] << " " ;
-  }
-
-  for(int count = 0; count < 3 * n_collapses; count ++){
-            file2 << new_points_history[count] << " " ;
-  }
-
-  file1.close();
-  file2.close();
 
   // clean up working data
   for (i = 0; i < numPts; i++)
