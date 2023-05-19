@@ -11,6 +11,7 @@ So far to make it run :
 - Build the vtk's wheel with `bash ../build_wheel.sh` (see pyvistadoc to adapt the script on your python version)
 - install pyvista, vedo
 - reinstall vtk with `pip install ../build/dist/name_of_wheel.whl`
+- quadric_decimation depends also on scipy and gudhi to nearest neighbors computations
 - enjoy parallel decimation :)
 
 ## TODO list :

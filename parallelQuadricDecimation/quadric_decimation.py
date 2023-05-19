@@ -37,14 +37,14 @@ class QuadricDecimation:
         decimated_mesh = mesh.decimate(target_reduction=self.target_reduction)
 
         # Read the history of collapsed points
-        file = open("~/collapses_history")
+        file = open("/home/louis/collapses_history")
         list_str = file.readline().split()
         list_int = [int(i) for i in list_str]
         collapses_history = np.array(list_int).reshape(-1, 2)
         collapses_history = collapses_history[collapses_history[:,0] != -1]
 
         # Read the history of new points
-        file = open("~/new_points_history")
+        file = open("/home/louis/new_points_history")
         list_str = file.readline().split()
         list_float = [float(i) for i in list_str]
         newpoints_history = np.array(list_float).reshape(-1, 3)
@@ -115,3 +115,45 @@ class QuadricDecimation:
         points = points[keep]
 
         return pyvista.PolyData(points, faces=self.faces.copy())
+    
+
+if __name__ == "__main__":
+    # Test the parallel quadric decimation
+    datafolder = "/home/louis/Environnements/singularity_homes/keops-full/GitHub/scikit-shapes-draft/data/SCAPE/scapecomp/"
+    reference_mesh = pyvista.read(datafolder + "/" + "mesh003.ply")
+    other_meshes = [pyvista.read(datafolder + "/" + "mesh00" + str(i) + ".ply") for i in range(4, 10)]
+
+    d = QuadricDecimation(target_reduction=0.99)
+    d.fit(reference_mesh)
+
+    decimated_reference = d.transform(reference_mesh)
+    p = pyvista.Plotter(shape=(1, 4))
+    p.subplot(0, 0)
+    p.add_mesh(decimated_reference)
+    p.add_points(decimated_reference.points, color="red", point_size=5, render_points_as_spheres=True)
+
+    for i in range(1, 4):
+        decimated_mesh = d.transform(other_meshes[i-1])
+        p.subplot(0, i)
+        p.add_mesh(decimated_mesh)
+        p.add_points(decimated_mesh.points, color="red", point_size=5, render_points_as_spheres=True)
+
+    p.show()
+
+    import os
+
+    filenames = [f for f in os.listdir(datafolder) if f.endswith(".ply") and "shaked" not in f]
+    meshes = [pyvista.read(datafolder + "/" + f) for f in os.listdir(datafolder) if f.endswith(".ply") and "shaked" not in f]
+    reference = meshes[0]
+    d = QuadricDecimation(target_reduction=0.99)
+    d.fit(reference)
+
+    target_folder = "/home/louis/data/SCAPE/low_resolution/"
+
+    for i in range(len(meshes)):
+        if meshes[i].n_points == 12500:
+            decimated_mesh = d.transform(meshes[i])
+            decimated_mesh.save(target_folder + "/" + filenames[i])
+        else:
+            print("Mesh " + filenames[i] + " has not 12500 points...")
+
