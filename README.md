@@ -1,5 +1,11 @@
 ![VTK - The Visualization Toolkit][vtk-banner]
 
+This is a fork of vtk intended to modify the Quadric Decimation algorithm to have access to the successive collapses
+
+
+To build VTK Python's wheel: https://docs.pyvista.org/version/stable/extras/building_vtk.html
+
+
 Introduction
 ============
 

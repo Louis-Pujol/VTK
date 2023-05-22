@@ -342,6 +342,10 @@ protected:
   double** TempA;
   double* TempData;
 
+  // Variable to store the history of the decimation
+  int* collapses_history;
+  double* new_points_history;
+
 private:
   vtkQuadricDecimation(const vtkQuadricDecimation&) = delete;
   void operator=(const vtkQuadricDecimation&) = delete;

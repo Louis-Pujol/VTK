@@ -64,6 +64,7 @@
 #include <memory>
 
 #include <cassert>
+#include <cmath>
 #include <sstream>
 #include <string>
 
@@ -282,8 +283,6 @@ struct WriteBinaryDataBlockWorker
 
 }; // End WriteBinaryDataBlockWorker
 
-namespace
-{
 //------------------------------------------------------------------------------
 // Specialize for vtkDataArrays, which implicitly cast everything to double:
 template <class ValueType>
@@ -347,8 +346,6 @@ void WriteDataArrayFallback(ValueType*, vtkDataArray* array, WriteBinaryDataBloc
   }
 
   vtkXMLWriterHelper::SetProgressPartial(worker.Writer, 1);
-}
-
 }
 
 //------------------------------------------------------------------------------
@@ -3054,7 +3051,7 @@ void vtkXMLWriter::UpdateProgressDiscrete(float progress)
   if (!this->AbortExecute)
   {
     // Round progress to nearest 100th.
-    float rounded = static_cast<float>(static_cast<int>((progress * 100) + 0.5f)) / 100.f;
+    float rounded = std::round(progress * 100) / 100.f;
     if (this->GetProgress() != rounded)
     {
       this->UpdateProgress(rounded);
