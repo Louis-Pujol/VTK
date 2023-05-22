@@ -1,20 +1,65 @@
 import numpy as np
 import pyvista
 from gudhi.point_cloud.knn import KNearestNeighbors
+import numba
+
+@numba.jit(nopython=True, fastmath=True)
+def _decimate(points, alphas, collapses_history):
+    '''
+    This function applies the decimation to a mesh that is in correspondence with the reference mesh given the information about successive collapses.
+
+    Args:
+        points (np.ndarray): the points of the mesh to decimate.
+        alphas (np.ndarray): the list of alpha coefficients such that when (e0, e1) collapses : e0 <- alpha * e0 + (1-alpha) * e1
+        collapses_history (np.ndarray): the history of collapses, a list of edges (e0, e1) that have been collapsed. The convention is that e0 is
+        the point that remains and e1 is the point that is removed.
+
+    Returns:
+        points (np.ndarray): the decimated points.
+
+    '''
+
+    # start = time.time()
+    # dont_keep = np.zeros(len(collapses_history), dtype=np.int64)
+
+    for i in range(len(collapses_history)):
+
+        e0, e1 = collapses_history[i]
+        points[e0] = (alphas[i] * points[e0] + (1-alphas[i]) * points[e1])
+
+    return points
+
+@numba.jit(nopython=True, fastmath=True)
+def _compute_alphas(points, collapses_history, newpoints_history):
+    '''
+    '''
+
+    alphas = np.zeros(len(collapses_history))
+
+    for i in range(len(collapses_history)):
+        e0, e1 = collapses_history[i]
+        
+        alpha = np.linalg.norm(newpoints_history[i] - points[e1]) / np.linalg.norm(points[e0] - points[e1])
+        points[e0] = (alpha * points[e0] + (1-alpha) * points[e1])
+        alphas[i] = alpha
+
+    return alphas
 
 class QuadricDecimation:
     '''
     This class implements the quadric decimation algorithm and make it possible to run it in parallel.
     '''
 
-    def __init__(self, target_reduction=0.5):
+    def __init__(self, target_reduction=0.5, use_numba=True):
         '''
         Initialize the quadric decimation algorithm with a target reduction.
 
         Args:
             target_reduction (float): the target reduction of the mesh.
+            use_numba (bool): whether to use numba to speed up the computation when replaying decimation process.
         '''
         self.target_reduction = target_reduction
+        self.use_numba = use_numba
 
     def fit(self, mesh):
         '''
@@ -34,7 +79,10 @@ class QuadricDecimation:
             mesh (pyvista.PolyData): the reference mesh.
         '''
 
-        decimated_mesh = mesh.decimate(target_reduction=self.target_reduction)
+        decimated_mesh = mesh.decimate(
+            target_reduction=self.target_reduction,
+            volume_preservation=True,
+            attribute_error=True)
 
         # Read the history of collapsed points
         file = open("/home/louis/collapses_history")
@@ -51,15 +99,22 @@ class QuadricDecimation:
         newpoints_history = newpoints_history[0:len(collapses_history)]
 
         # Apply the history of collapses to the mesh
-        alphas = np.zeros(len(collapses_history))
-        points = np.array(mesh.points.copy())
-        for i in range(len(collapses_history)):
-            e0, e1 = collapses_history[i]
-            
-            alpha = np.linalg.norm(newpoints_history[i] - points[e1]) / np.linalg.norm(points[e0] - points[e1])
-            alphas[i] = alpha
-            newpoint = (alpha * points[e0] + (1-alpha) * points[e1])
-            points[e0] = newpoint
+        
+        if not self.use_numba:
+            alphas = np.zeros(len(collapses_history))
+            points = np.array(mesh.points.copy())
+
+            for i in range(len(collapses_history)):
+                e0, e1 = collapses_history[i]
+                
+                alpha = np.linalg.norm(newpoints_history[i] - points[e1]) / np.linalg.norm(points[e0] - points[e1])
+                alphas[i] = alpha
+                newpoint = (alpha * points[e0] + (1-alpha) * points[e1])
+                points[e0] = newpoint
+        else:
+            points = np.array(mesh.points.copy())
+            alphas = _compute_alphas(points, collapses_history, newpoints_history)
+            points = _decimate(points, alphas=alphas, collapses_history=collapses_history)
 
         keep = np.setdiff1d(np.arange(len(points)), collapses_history[:,1])
         points = points[keep]
@@ -99,7 +154,7 @@ class QuadricDecimation:
         This function applies the decimation to a mesh that is in correspondence with the reference mesh.
 
         Args:
-            mesh (pyvista.PolyData): the mesh to decimate.
+            mesh (pyvista.PolyData): the mesh to decimate (must be in corresppondance with the fitted one).
 
         Returns:
             pyvista.PolyData: the decimated mesh.
@@ -107,9 +162,12 @@ class QuadricDecimation:
 
         points = np.array(mesh.points.copy())
 
-        for i in range(len(self.collapses_history)):
-            e0, e1 = self.collapses_history[i]
-            points[e0] = (self.alphas[i] * points[e0] + (1-self.alphas[i]) * points[e1])
+        if self.use_numba:
+            points = _decimate(points, collapses_history=self.collapses_history, alphas=self.alphas)
+        else:
+            for i in range(len(self.collapses_history)):
+                e0, e1 = self.collapses_history[i]
+                points[e0] = (self.alphas[i] * points[e0] + (1-self.alphas[i]) * points[e1])
 
         keep = np.setdiff1d(np.arange(len(points)), self.collapses_history[:,1])
         points = points[keep]
@@ -117,43 +175,128 @@ class QuadricDecimation:
         return pyvista.PolyData(points, faces=self.faces.copy())
     
 
+    def partial_transform(self, mesh, n_collapses):
+        '''
+        Apply a partial decimation to a mesh that is in correspondence with the reference mesh. The number of collapses is given by n_collapses.
+        It returns the decimated mesh as a PolyData with only points/edges structure. In addition, it returns the mapping from the indices of the
+        point in the original mesh to the indices of the decimated mesh (useful to propagate landmarks).
+
+        Args:
+            mesh (pyvista.PolyData): the mesh to decimate (must be in corresppondance with the fitted one).
+            n_collapses (int): the number of collapses to apply.
+        
+        Returns:
+            pyvista.PolyData: the decimated mesh.
+            np.ndarray: the mapping from the indices of the point in the original mesh to the indices of the decimated mesh.
+        '''
+
+        if n_collapses > len(self.collapses_history):
+            n_collapses = len(self.collapses_history)
+
+        skeleton = mesh.extract_all_edges() # Extract the skeleton of the mesh
+
+        # extract_all_edges() returns a PolyData object with points and lines
+        # but points are not aligned with the points of the mesh
+        # we need to align them
+
+        # As extract_all_edges() shuffles the points, we need to reorder the edges
+        knn = KNearestNeighbors(
+            k=1,
+            return_distance=False,
+            return_index=True,
+            implementation='ckdtree',
+            n_jobs=-1).fit(skeleton.points)
+
+        indices_map = knn.transform(mesh.points)[:, 0]
+        inverse_map = np.argsort(indices_map)
+
+        lines = skeleton.lines.reshape(-1, 3)
+        edges = inverse_map[lines[:,1:]]
+
+        # Start with the points of the reference mesh
+        points = mesh.points.copy()
+
+        # At this point, the couple (points, edges) is the skeleton of the reference mesh
+        # with the right order of points to start the decimation
+
+
+        if not self.use_numba:
+            for i in range(n_collapses):
+                e0, e1 = d.collapses_history[i]
+                points[e0] = (self.alphas[i] * points[e0] + (1-self.alphas[i]) * points[e1])
+        else:
+            points = _decimate(
+                points,
+                collapses_history=self.collapses_history[0:n_collapses],
+                alphas=self.alphas[0:n_collapses],
+                )
+        
+
+        dont_keep = self.collapses_history[0:n_collapses, 1]
+        keep = np.setdiff1d(np.arange(len(points)), dont_keep)
+
+        indice_mapping = np.arange(len(points), dtype=int)
+        indice_mapping[dont_keep] = self.collapses_history[0:n_collapses, 0]
+        
+
+        previous = np.zeros(len(indice_mapping))
+        while(not np.array_equal(previous, indice_mapping)):
+            previous = indice_mapping.copy()
+            indice_mapping[dont_keep] = indice_mapping[indice_mapping[dont_keep]]
+
+
+        points = points[keep]
+
+        tmp = {keep[i]: i for i in range(len(keep))}
+        f = lambda x: tmp[x]
+        indice_mapping = np.vectorize(f)(indice_mapping)
+
+        # Apply the mapping to the edges id
+        updated_edges = indice_mapping[edges]
+
+        # Remove the (i, i) edges
+        edges_to_remove_id = np.argwhere((updated_edges[:, 0] - updated_edges[:, 1]) == 0).T[0]
+        edges_to_remove_id
+        updated_edges = np.delete(updated_edges, edges_to_remove_id, axis=0)
+
+        # Convert to pyVista lines format
+        lines = np.hstack((np.ones((len(updated_edges), 1)) * 2, updated_edges)).astype(int).reshape(-1)
+
+        return pyvista.PolyData(points, lines=lines), indice_mapping
+    
+
 if __name__ == "__main__":
-    # Test the parallel quadric decimation
-    datafolder = "/home/louis/Environnements/singularity_homes/keops-full/GitHub/scikit-shapes-draft/data/SCAPE/scapecomp/"
-    reference_mesh = pyvista.read(datafolder + "/" + "mesh003.ply")
-    other_meshes = [pyvista.read(datafolder + "/" + "mesh00" + str(i) + ".ply") for i in range(4, 10)]
-
-    d = QuadricDecimation(target_reduction=0.99)
-    d.fit(reference_mesh)
-
-    decimated_reference = d.transform(reference_mesh)
-    p = pyvista.Plotter(shape=(1, 4))
-    p.subplot(0, 0)
-    p.add_mesh(decimated_reference)
-    p.add_points(decimated_reference.points, color="red", point_size=5, render_points_as_spheres=True)
-
-    for i in range(1, 4):
-        decimated_mesh = d.transform(other_meshes[i-1])
-        p.subplot(0, i)
-        p.add_mesh(decimated_mesh)
-        p.add_points(decimated_mesh.points, color="red", point_size=5, render_points_as_spheres=True)
-
-    p.show()
 
     import os
+    from time import time
 
-    filenames = [f for f in os.listdir(datafolder) if f.endswith(".ply") and "shaked" not in f]
-    meshes = [pyvista.read(datafolder + "/" + f) for f in os.listdir(datafolder) if f.endswith(".ply") and "shaked" not in f]
+    # Test the parallel quadric decimation
+    datafolder = "/home/louis/Environnements/singularity_homes/keops-full/GitHub/scikit-shapes-draft/data/SCAPE/scapecomp/"
+    filenames = [f for f in os.listdir(datafolder) if f.endswith(".ply") and "shaked" not in f and "mesh" in f]
+    meshes = [pyvista.read(datafolder + "/" + f) for f in filenames]
+    print('Number of meshes: ', len(meshes))
     reference = meshes[0]
-    d = QuadricDecimation(target_reduction=0.99)
+    d = QuadricDecimation(target_reduction=0.99, use_numba=True)
+
+    start = time()
     d.fit(reference)
+    print("Fitting time: ", time() - start)
 
     target_folder = "/home/louis/data/SCAPE/low_resolution/"
 
+
+    transform_time = 0.0
+    save_time = 0.0
     for i in range(len(meshes)):
         if meshes[i].n_points == 12500:
+            start = time()
             decimated_mesh = d.transform(meshes[i])
+            transform_time += time() - start
+            start = time()
             decimated_mesh.save(target_folder + "/" + filenames[i])
-        else:
-            print("Mesh " + filenames[i] + " has not 12500 points...")
+            save_time += time() - start
 
+    print("Transform time: ", transform_time)
+    print("Save time: ", save_time)
+
+    decimated_mesh.plot()
