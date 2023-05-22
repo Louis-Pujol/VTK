@@ -2,8 +2,9 @@
 
 This is a fork of vtk intended to modify the Quadric Decimation algorithm to have access to the successive collapses
 
-
 To build VTK Python's wheel: https://docs.pyvista.org/version/stable/extras/building_vtk.html
+
+More detail in parallelQuadricDecimation folder's README
 
 
 Introduction
