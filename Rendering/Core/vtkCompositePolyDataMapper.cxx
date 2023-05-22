@@ -66,8 +66,11 @@ public:
     std::stack<vtkColor3d> SelectionColor;
     std::stack<double> SelectionOpacity;
     std::stack<int> ScalarMode;
-    std::stack<std::string> ScalarArrayName;
+    std::stack<int> ArrayAccessMode;
     std::stack<int> ArrayComponent;
+    std::stack<int> ArrayId;
+    std::stack<std::string> ArrayName;
+    std::stack<vtkIdType> FieldDataTupleId;
   };
   RenderBlockState BlockState;
 
@@ -279,7 +282,8 @@ bool vtkCompositePolyDataMapper::HasTranslucentPolygonalGeometry()
     this->InvokeEvent(vtkCommand::EndEvent, nullptr);
   }
 
-  if (this->GetInputDataObject(0, 0) == nullptr)
+  auto input = this->GetInputDataObject(0, 0);
+  if (input == nullptr)
   {
     return false;
   }
@@ -291,7 +295,7 @@ bool vtkCompositePolyDataMapper::HasTranslucentPolygonalGeometry()
   this->TempState.Clear();
   this->TempState.Append(cda ? cda->GetMTime() : 0, "cda mtime");
   this->TempState.Append(lut ? lut->GetMTime() : 0, "lut mtime");
-  this->TempState.Append(this->GetInputDataObject(0, 0)->GetMTime(), "input mtime");
+  this->TempState.Append(input->GetMTime(), "input mtime");
   if (this->TranslucentState != this->TempState)
   {
     this->TranslucentState = this->TempState;
@@ -303,8 +307,7 @@ bool vtkCompositePolyDataMapper::HasTranslucentPolygonalGeometry()
 
     // Push base-values on the state stack.
     unsigned int flat_index = 0;
-    this->HasTranslucentGeometry =
-      this->RecursiveHasTranslucentGeometry(this->GetInputDataObject(0, 0), flat_index);
+    this->HasTranslucentGeometry = this->RecursiveHasTranslucentGeometry(input, flat_index);
   }
 
   return this->HasTranslucentGeometry;
@@ -331,7 +334,7 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
     this->InvokeEvent(vtkCommand::EndEvent, nullptr);
   }
   auto input = this->GetInputDataObject(0, 0);
-  if (this->GetInputDataObject(0, 0) == nullptr)
+  if (input == nullptr)
   {
     vtkErrorMacro(<< "No input!");
   }
@@ -340,50 +343,8 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
   // signatures (aka have normals, have scalars etc)
   // At a high-level, the following code visits every polydata in this composite dataset,
   // creates/reuses an existing polydata mapper based on a hash string.
-  if (this->DelegatorMTime < this->GetInputDataObject(0, 0)->GetMTime() ||
-    this->DelegatorMTime < this->GetMTime())
+  if (this->DelegatorMTime < input->GetMTime() || this->DelegatorMTime < this->GetMTime())
   {
-    this->PrototypeMapper->vtkMapper::ShallowCopy(this);
-    // unmark old delegates
-    for (auto& iter : internals.BatchedDelegators)
-    {
-      auto& delegator = iter.second;
-      delegator->Unmark();
-    }
-    if (auto tree = vtkDataObjectTree::SafeDownCast(input))
-    {
-      auto dobjIter = vtk::TakeSmartPointer(this->MakeAnIterator(tree));
-      for (dobjIter->InitTraversal(); !dobjIter->IsDoneWithTraversal(); dobjIter->GoToNextItem())
-      {
-        const auto polydata = vtkPolyData::SafeDownCast(dobjIter->GetCurrentDataObject());
-        const auto flatIndex = dobjIter->GetCurrentFlatIndex();
-        this->InsertPolyData(polydata, flatIndex);
-      }
-    }
-    else if (auto polydata = vtkPolyData::SafeDownCast(input))
-    {
-      this->InsertPolyData(polydata, 0);
-    }
-    else
-    {
-      vtkErrorMacro(<< "Expected a vtkDataObjectTree or vtkPolyData input. Got "
-                    << input->GetClassName());
-    }
-    // delete unused old helpers/data
-    for (auto iter = internals.BatchedDelegators.begin();
-         iter != internals.BatchedDelegators.end();)
-    {
-      iter->second->ClearUnmarkedBatchElements();
-      if (!iter->second->GetMarked())
-      {
-        iter->second->GetDelegate()->ReleaseGraphicsResources(renderer->GetVTKWindow());
-        internals.BatchedDelegators.erase(iter++);
-      }
-      else
-      {
-        ++iter;
-      }
-    }
     this->DelegatorMTime.Modified();
   }
 
@@ -405,6 +366,13 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
     }
     auto selColor = property->GetSelectionColor();
 
+    // unmark old delegators
+    for (auto& iter : internals.BatchedDelegators)
+    {
+      auto& delegator = iter.second;
+      delegator->Unmark();
+    }
+
     // Push base-values on the state stack.
     internals.BlockState.Visibility.push(true);
     internals.BlockState.Pickability.push(true);
@@ -414,10 +382,16 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
     internals.BlockState.SpecularColor.emplace(property->GetSpecularColor());
     internals.BlockState.SelectionColor.emplace(selColor);
     internals.BlockState.SelectionOpacity.push(selColor[3]);
+    internals.BlockState.ScalarMode.push(this->ScalarMode);
+    internals.BlockState.ArrayAccessMode.push(this->ArrayAccessMode);
+    internals.BlockState.ArrayComponent.push(this->ArrayComponent);
+    internals.BlockState.ArrayId.push(this->ArrayId);
+    internals.BlockState.ArrayName.emplace(this->ArrayName);
+    internals.BlockState.FieldDataTupleId.push(this->FieldDataTupleId);
 
     {
       unsigned int flatIndex = 0;
-      this->BuildRenderValues(renderer, actor, this->GetInputDataObject(0, 0), flatIndex);
+      this->BuildRenderValues(renderer, actor, input, flatIndex);
     }
 
     internals.BlockState.Visibility.pop();
@@ -428,6 +402,28 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
     internals.BlockState.SpecularColor.pop();
     internals.BlockState.SelectionColor.pop();
     internals.BlockState.SelectionOpacity.pop();
+    internals.BlockState.ScalarMode.pop();
+    internals.BlockState.ArrayAccessMode.pop();
+    internals.BlockState.ArrayComponent.pop();
+    internals.BlockState.ArrayId.pop();
+    internals.BlockState.ArrayName.pop();
+    internals.BlockState.FieldDataTupleId.pop();
+
+    // delete unused old helpers/data
+    for (auto iter = internals.BatchedDelegators.begin();
+         iter != internals.BatchedDelegators.end();)
+    {
+      iter->second->ClearUnmarkedBatchElements();
+      if (!iter->second->GetMarked())
+      {
+        iter->second->GetDelegate()->ReleaseGraphicsResources(renderer->GetVTKWindow());
+        internals.BatchedDelegators.erase(iter++);
+      }
+      else
+      {
+        ++iter;
+      }
+    }
   }
 
   for (auto& iter : internals.BatchedDelegators)
@@ -443,14 +439,14 @@ void vtkCompositePolyDataMapper::Render(vtkRenderer* renderer, vtkActor* actor)
 }
 
 //------------------------------------------------------------------------------
-void vtkCompositePolyDataMapper::InsertPolyData(
+vtkCompositePolyDataMapper::MapperHashType vtkCompositePolyDataMapper::InsertPolyData(
   vtkPolyData* polydata, const unsigned int& flatIndex)
 {
   if (polydata == nullptr)
   {
     vtkDebugMacro(<< "DataObject at flatIndex=" << flatIndex
                   << " is not a vtkPolyData or a vtkPolyData derived instance!");
-    return;
+    return VTK_TYPE_UINT64_MAX;
   }
   auto& internals = (*this->Internals);
   const auto hash = this->GenerateHash(polydata);
@@ -465,10 +461,17 @@ void vtkCompositePolyDataMapper::InsertPolyData(
   delegator->ShallowCopy(this);
   delegator->Mark();
 
-  vtkCompositePolyDataMapperDelegator::BatchElement batchElement;
-  batchElement.PolyData = polydata;
-  batchElement.FlatIndex = flatIndex;
-  delegator->Insert(std::move(batchElement));
+  auto createBatchElement =
+    [](vtkPolyData* _polydata,
+      unsigned int _flatIndex) -> vtkCompositePolyDataMapperDelegator::BatchElement {
+    vtkCompositePolyDataMapperDelegator::BatchElement element;
+    element.PolyData = _polydata;
+    element.FlatIndex = _flatIndex;
+    return element;
+  };
+
+  delegator->Insert(createBatchElement(polydata, flatIndex));
+  return hash;
 }
 
 //------------------------------------------------------------------------------
@@ -503,8 +506,45 @@ void vtkCompositePolyDataMapper::BuildRenderValues(
     internals.BlockState.SpecularColor.push(color);
   }
 
+  bool overrides_scalar_mode = (cda && cda->HasBlockScalarMode(dobj));
+  if (overrides_scalar_mode)
+  {
+    internals.BlockState.ScalarMode.push(cda->GetBlockScalarMode(dobj));
+  }
+
+  bool overrides_scalar_array_access_mode = (cda && cda->HasBlockArrayAccessMode(dobj));
+  if (overrides_scalar_array_access_mode)
+  {
+    internals.BlockState.ArrayAccessMode.push(cda->GetBlockArrayAccessMode(dobj));
+  }
+
+  bool overrides_scalar_array_component = (cda && cda->HasBlockArrayComponent(dobj));
+  if (overrides_scalar_array_component)
+  {
+    internals.BlockState.ArrayComponent.push(cda->GetBlockArrayComponent(dobj));
+  }
+
+  bool overrides_scalar_array_id = (cda && cda->HasBlockArrayId(dobj));
+  if (overrides_scalar_array_id)
+  {
+    internals.BlockState.ArrayId.push(cda->GetBlockArrayId(dobj));
+  }
+
+  bool overrides_field_tuple_id = (cda && cda->HasBlockFieldDataTupleId(dobj));
+  if (overrides_field_tuple_id)
+  {
+    internals.BlockState.FieldDataTupleId.push(cda->GetBlockFieldDataTupleId(dobj));
+  }
+
+  bool overrides_scalar_array_name = (cda && cda->HasBlockArrayName(dobj));
+  if (overrides_scalar_array_name)
+  {
+    internals.BlockState.ArrayName.push(cda->GetBlockArrayName(dobj));
+  }
+
   // Advance flat-index. After this point, flatIndex no longer points to this
   // block.
+  const auto originalFlatIndex = flatIndex;
   flatIndex++;
 
   bool textureOpaque = true;
@@ -528,13 +568,23 @@ void vtkCompositePolyDataMapper::BuildRenderValues(
       }
     }
   }
-  else
+  else if (auto polydata = vtkPolyData::SafeDownCast(dobj))
   {
-    vtkPolyData* polydata = vtkPolyData::SafeDownCast(dobj);
-    const auto hash = this->GenerateHash(polydata);
-    const auto& delegate = internals.BatchedDelegators[hash];
+    this->PrototypeMapper->SetScalarMode(internals.BlockState.ScalarMode.top());
+    this->PrototypeMapper->SetArrayAccessMode(internals.BlockState.ArrayAccessMode.top());
+    this->PrototypeMapper->SetArrayComponent(internals.BlockState.ArrayComponent.top());
+    this->PrototypeMapper->SetArrayId(internals.BlockState.ArrayId.top());
+    this->PrototypeMapper->SetArrayName(internals.BlockState.ArrayName.top().c_str());
+    this->PrototypeMapper->SetFieldDataTupleId(internals.BlockState.FieldDataTupleId.top());
+
+    const auto hash = this->InsertPolyData(polydata, originalFlatIndex);
+    if (hash == VTK_TYPE_UINT64_MAX)
+    {
+      return;
+    }
+    const auto& delegator = internals.BatchedDelegators[hash];
     // because it was incremented few lines above.
-    if (auto inputItem = delegate->Get(polydata))
+    if (auto inputItem = delegator->Get(polydata))
     {
       inputItem->Opacity = internals.BlockState.Opacity.top();
       inputItem->Visibility = internals.BlockState.Visibility.top();
@@ -545,24 +595,61 @@ void vtkCompositePolyDataMapper::BuildRenderValues(
       inputItem->SelectionOpacity = internals.BlockState.SelectionOpacity.top();
       inputItem->OverridesColor = (internals.BlockState.AmbientColor.size() > 1);
       inputItem->IsOpaque = (inputItem->Opacity >= 1.0) ? textureOpaque : false;
+      inputItem->ScalarMode = internals.BlockState.ScalarMode.top();
+      inputItem->ArrayAccessMode = internals.BlockState.ArrayAccessMode.top();
+      inputItem->ArrayComponent = internals.BlockState.ArrayComponent.top();
+      inputItem->ArrayId = internals.BlockState.ArrayId.top();
+      inputItem->ArrayName = internals.BlockState.ArrayName.top();
+      inputItem->FieldDataTupleId = internals.BlockState.FieldDataTupleId.top();
       // if we think it is opaque check the scalars
       if (inputItem->IsOpaque && this->ScalarVisibility)
       {
         vtkScalarsToColors* lut = this->GetLookupTable();
         int cellFlag;
-        vtkDataArray* scalars = vtkCompositePolyDataMapper::GetScalars(polydata, this->ScalarMode,
-          this->ArrayAccessMode, this->ArrayId, this->ArrayName, cellFlag);
+        vtkDataArray* scalars =
+          vtkCompositePolyDataMapper::GetScalars(polydata, inputItem->ScalarMode,
+            inputItem->ArrayAccessMode, inputItem->ArrayId, inputItem->ArrayName.c_str(), cellFlag);
 
         unsigned char ghostsToSkip;
         vtkUnsignedCharArray* ghosts =
-          vtkAbstractMapper::GetGhostArray(polydata, this->ScalarMode, ghostsToSkip);
+          vtkAbstractMapper::GetGhostArray(polydata, inputItem->ScalarMode, ghostsToSkip);
 
-        if (!lut->IsOpaque(scalars, this->ColorMode, this->ArrayComponent, ghosts, ghostsToSkip))
+        if (!lut->IsOpaque(
+              scalars, this->ColorMode, inputItem->ArrayComponent, ghosts, ghostsToSkip))
         {
           inputItem->IsOpaque = false;
         }
       }
     }
+  }
+  else
+  {
+    vtkErrorMacro(<< "Expected a vtkDataObjectTree or vtkPolyData input. Got "
+                  << dobj->GetClassName());
+  }
+  if (overrides_scalar_mode)
+  {
+    internals.BlockState.ScalarMode.pop();
+  }
+  if (overrides_scalar_array_access_mode)
+  {
+    internals.BlockState.ArrayAccessMode.pop();
+  }
+  if (overrides_scalar_array_component)
+  {
+    internals.BlockState.ArrayComponent.pop();
+  }
+  if (overrides_scalar_array_id)
+  {
+    internals.BlockState.ArrayId.pop();
+  }
+  if (overrides_field_tuple_id)
+  {
+    internals.BlockState.FieldDataTupleId.pop();
+  }
+  if (overrides_scalar_array_name)
+  {
+    internals.BlockState.ArrayName.pop();
   }
   if (overrides_color)
   {
@@ -631,6 +718,41 @@ bool vtkCompositePolyDataMapper::RecursiveHasTranslucentGeometry(
         return false;
       }
     }
+    int scalarMode = this->ScalarMode;
+    int arrayAccessMode = this->ArrayAccessMode;
+    int arrayComponent = this->ArrayComponent;
+    int arrayId = this->ArrayId;
+    std::string arrayName = this->ArrayName;
+
+    bool overrides_scalar_mode = (cda && cda->HasBlockArrayAccessMode(dobj));
+    if (overrides_scalar_mode)
+    {
+      scalarMode = cda->GetBlockArrayAccessMode(dobj);
+    }
+
+    bool overrides_scalar_array_access_mode = (cda && cda->HasBlockArrayAccessMode(dobj));
+    if (overrides_scalar_array_access_mode)
+    {
+      arrayAccessMode = cda->GetBlockArrayAccessMode(dobj);
+    }
+
+    bool overrides_scalar_array_component = (cda && cda->HasBlockArrayComponent(dobj));
+    if (overrides_scalar_array_component)
+    {
+      arrayComponent = cda->GetBlockArrayComponent(dobj);
+    }
+
+    bool overrides_scalar_array_id = (cda && cda->HasBlockArrayId(dobj));
+    if (overrides_scalar_array_id)
+    {
+      arrayId = cda->GetBlockArrayId(dobj);
+    }
+
+    bool overrides_scalar_array_name = (cda && cda->HasBlockArrayName(dobj));
+    if (overrides_scalar_array_name)
+    {
+      arrayName = cda->GetBlockArrayName(dobj);
+    }
 
     vtkPolyData* pd = vtkPolyData::SafeDownCast(dobj);
 
@@ -640,13 +762,12 @@ bool vtkCompositePolyDataMapper::RecursiveHasTranslucentGeometry(
       vtkScalarsToColors* lut = this->GetLookupTable();
       int cellFlag;
       vtkDataArray* scalars = vtkCompositePolyDataMapper::GetScalars(
-        pd, this->ScalarMode, this->ArrayAccessMode, this->ArrayId, this->ArrayName, cellFlag);
+        pd, scalarMode, arrayAccessMode, arrayId, arrayName.c_str(), cellFlag);
 
       unsigned char ghostsToSkip;
-      vtkUnsignedCharArray* ghosts =
-        vtkAbstractMapper::GetGhostArray(pd, this->ScalarMode, ghostsToSkip);
+      vtkUnsignedCharArray* ghosts = vtkAbstractMapper::GetGhostArray(pd, scalarMode, ghostsToSkip);
 
-      if (lut->IsOpaque(scalars, this->ColorMode, this->ArrayComponent, ghosts, ghostsToSkip) == 0)
+      if (lut->IsOpaque(scalars, this->ColorMode, arrayComponent, ghosts, ghostsToSkip) == 0)
       {
         return true;
       }
@@ -879,6 +1000,360 @@ void vtkCompositePolyDataMapper::RemoveBlockOpacities()
     this->CompositeAttributes->RemoveBlockOpacities();
     this->Modified();
   }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockScalarMode(unsigned int index, int value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockScalarMode(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+int vtkCompositePolyDataMapper::GetBlockScalarMode(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return VTK_SCALAR_MODE_DEFAULT;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockScalarMode(dataObj);
+  }
+  return VTK_SCALAR_MODE_DEFAULT;
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockScalarMode(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockScalarMode(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockScalarModes()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockScalarModes();
+  this->Modified();
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockArrayAccessMode(unsigned int index, int value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockArrayAccessMode(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+int vtkCompositePolyDataMapper::GetBlockArrayAccessMode(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return VTK_GET_ARRAY_BY_ID;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockArrayAccessMode(dataObj);
+  }
+  return VTK_GET_ARRAY_BY_ID;
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayAccessMode(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockArrayAccessMode(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayAccessModes()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockArrayAccessModes();
+  this->Modified();
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockArrayComponent(unsigned int index, int value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockArrayComponent(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+int vtkCompositePolyDataMapper::GetBlockArrayComponent(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return 0;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockArrayComponent(dataObj);
+  }
+  return 0;
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayComponent(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockArrayComponent(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayComponents()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockArrayComponents();
+  this->Modified();
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockArrayId(unsigned int index, int value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockArrayId(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+int vtkCompositePolyDataMapper::GetBlockArrayId(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return -1;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockArrayId(dataObj);
+  }
+  return -1;
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayId(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockArrayId(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayIds()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockArrayIds();
+  this->Modified();
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockArrayName(unsigned int index, const std::string& value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockArrayName(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+std::string vtkCompositePolyDataMapper::GetBlockArrayName(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return "";
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockArrayName(dataObj);
+  }
+  return "";
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayName(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockArrayName(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockArrayNames()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockArrayNames();
+  this->Modified();
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::SetBlockFieldDataTupleId(unsigned int index, vtkIdType value)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->SetBlockFieldDataTupleId(dataObj, value);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+vtkIdType vtkCompositePolyDataMapper::GetBlockFieldDataTupleId(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return -1;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    return this->CompositeAttributes->GetBlockFieldDataTupleId(dataObj);
+  }
+  return -1;
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockFieldDataTupleId(unsigned int index)
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  unsigned int start_index = 0;
+  if (auto dataObj = vtkCompositeDataDisplayAttributes::DataObjectFromIndex(
+        index, this->GetInputDataObject(0, 0), start_index))
+  {
+    this->CompositeAttributes->RemoveBlockFieldDataTupleId(dataObj);
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkCompositePolyDataMapper::RemoveBlockFieldDataTupleIds()
+{
+  if (!this->CompositeAttributes)
+  {
+    return;
+  }
+  this->CompositeAttributes->RemoveBlockFieldDataTupleIds();
+  this->Modified();
 }
 
 //------------------------------------------------------------------------------
