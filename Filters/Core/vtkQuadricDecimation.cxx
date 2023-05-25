@@ -55,9 +55,6 @@
 #include "vtkPriorityQueue.h"
 #include "vtkTriangle.h"
 
-#include <iostream>
-#include <fstream>
-
 VTK_ABI_NAMESPACE_BEGIN
 vtkStandardNewMacro(vtkQuadricDecimation);
 
@@ -91,6 +88,11 @@ vtkQuadricDecimation::vtkQuadricDecimation()
   this->TensorsWeight = 0.1;
 
   this->ActualReduction = 0.0;
+
+  this->SuccessiveCollapses = vtkIntArray::New();
+  this->SuccessiveCollapses->SetNumberOfComponents(2);
+  this->NewPoints = vtkDoubleArray::New();
+  this->NewPoints->SetNumberOfComponents(3);
 }
 
 //------------------------------------------------------------------------------
@@ -233,11 +235,6 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   vtkInformationVector** inputVector, vtkInformationVector* outputVector)
 {
 
-  std::ofstream myfile;
-  myfile.open("/home/louis/decimation.txt");
-  myfile << "You are working with a custom version of quadric Decimation.\n";
-  myfile.close();
-
   // get the info objects
   vtkInformation* inInfo = inputVector[0]->GetInformationObject(0);
   vtkInformation* outInfo = outputVector->GetInformationObject(0);
@@ -260,16 +257,6 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   vtkIdType npts;
   const vtkIdType* pts;
   vtkIdType numDeletedTris = 0;
-
-  // Create arrays to store the collapse history and the new points
-  int n_collapses;
-  n_collapses = numPts - 1; // maximum number of collapses (TODO - make this more accurate)
-  this->collapses_history = new int[2 * n_collapses];
-  for (j = 0; j < 2 * n_collapses; j++)
-  {
-    collapses_history[j] = -1;
-  }
-  this->new_points_history = new double[3 * n_collapses];
 
   // check some assumptions about the data
   if (input->GetPolys() == nullptr || input->GetPoints() == nullptr ||
@@ -415,12 +402,10 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
       continue;
     }
 
-    this->collapses_history[2 * this->NumberOfEdgeCollapses] = endPtIds[0];
-    this->collapses_history[2 * this->NumberOfEdgeCollapses + 1] = endPtIds[1];
-    this->new_points_history[3 * this->NumberOfEdgeCollapses] = x[0];
-    this->new_points_history[3 * this->NumberOfEdgeCollapses + 1] = x[1];
-    this->new_points_history[3 * this->NumberOfEdgeCollapses + 2] = x[2];
-
+    // Store the information about the edge collapse.
+    this->SuccessiveCollapses->InsertNextValue(endPtIds[0]);
+    this->SuccessiveCollapses->InsertNextValue(endPtIds[1]);
+    this->NewPoints->InsertNextTuple(x);
     this->NumberOfEdgeCollapses++;
 
     // Set the new coordinates of point0.
@@ -440,23 +425,6 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
 
   vtkDebugMacro(<< "Number Of Edge Collapses: " << this->NumberOfEdgeCollapses
                 << " Cost: " << cost);
-
-  // Save the decimation history
-
-  std::ofstream file1, file2;
-  file1.open("/home/louis/collapses_history");
-  file2.open("/home/louis/new_points_history");
-
-  for(int count = 0; count < 2 * n_collapses; count ++){
-            file1 << collapses_history[count] << " " ;
-  }
-
-  for(int count = 0; count < 3 * n_collapses; count ++){
-            file2 << new_points_history[count] << " " ;
-  }
-
-  file1.close();
-  file2.close();
 
   // clean up working data
   for (i = 0; i < numPts; i++)

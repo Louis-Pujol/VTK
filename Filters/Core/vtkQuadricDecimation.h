@@ -158,6 +158,14 @@ public:
 
   ///@{
   /**
+   * Getter/Setter for mapping point data to the output during decimation.
+   */
+  vtkGetMacro(SuccessiveCollapses, vtkIntArray*);
+  vtkGetMacro(NewPoints, vtkDoubleArray*);
+  ///@}
+
+  ///@{
+  /**
    * If attribute errors are to be included in the metric (i.e.,
    * AttributeErrorMetric is on), then the following flags control which
    * attributes are to be included in the error calculation. By default all
@@ -312,6 +320,9 @@ protected:
   vtkDoubleArray* TargetPoints;
   int NumberOfComponents;
   vtkPolyData* Mesh;
+
+  vtkIntArray* SuccessiveCollapses;
+  vtkDoubleArray* NewPoints;
 
   struct ErrorQuadric
   {
