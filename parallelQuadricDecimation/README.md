@@ -20,9 +20,9 @@ So far to make it run :
 - Understand deeper the algo : why the return of pyvista.decimate is not in the same order as our manual decimation and imposes us te reorder points ? Does it come from pyVista or from vtk ?
 - Why with a high target reduction there is a mismatch between manual decimation and pyvista.decimate (example with the cow and target_reduction=0.95) ? At first glance it seems to happen when a topological change append, maybe this is good to alert the user and stop decimation before it happens ?
 - we want to make records accessible with a proper getter and not with this ugly technique...
-- how to integrate this slighty modified vtk in scikit-shapes ?
+- how to integrate this slighty modified vtk in scikit-shapes ? -> look at CMake/vtkWheel* to modify the name of the library and avoid potential conflict with true vtk (OK solution but heavy)
 
 ### Python
-- parallel decimation seems ok, but we need to write projection of indices from original to decimated points
+- parallel decimation seems ok, but we need to write projection of indices from original to decimated points : OK
 
 
