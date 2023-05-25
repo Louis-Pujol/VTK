@@ -3,13 +3,16 @@ import pyvista
 from gudhi.point_cloud.knn import KNearestNeighbors
 import numba
 
+
 from pyvista.core.filters import _get_output
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
+
 def _do_decimation(mesh, target_reduction):
-    """Decimate a mesh using vtkQuadricDecimation. and return the decimated mesh, the collapses history and the newpoints
-    we assume that the mesh is a Pyvista PolyData
+    """Decimate a mesh using vtkQuadricDecimation. and return the decimated mesh,
+    the collapses history and the newpoints
+    we assume that the mesh is a Pyvista PolyData or vtkPolyData
 
     Args:
         mesh (vtkPolyData or pyVista PolyData): the mesh to decimate
@@ -20,10 +23,10 @@ def _do_decimation(mesh, target_reduction):
         np.ndarray: the collapses history
         np.ndarray: the newpoints
     """
-    #Test wether the mesh is a vtkPolyData
+    # Test wether the mesh is a vtkPolyData
     if not isinstance(mesh, vtk.vtkPolyData):
         raise TypeError("Input mesh must be a vtkPolyData or pyvista.PolyData")
-    
+
     alg = vtk.vtkQuadricDecimation()
     alg.SetInputData(mesh)
     alg.SetTargetReduction(target_reduction)
@@ -32,7 +35,6 @@ def _do_decimation(mesh, target_reduction):
     output_mesh = _get_output(alg)
     collapses = vtk_to_numpy(alg.GetSuccessiveCollapses())
     newpoints = vtk_to_numpy(alg.GetNewPoints())
-
 
     return output_mesh, collapses, newpoints
 
@@ -118,7 +120,9 @@ class QuadricDecimation:
         #     attribute_error=True,
         # )
 
-        decimated_mesh, collapses_history, newpoints_history = _do_decimation(mesh=mesh, target_reduction=self.target_reduction)
+        decimated_mesh, collapses_history, newpoints_history = _do_decimation(
+            mesh=mesh, target_reduction=self.target_reduction
+        )
 
         # # Read the history of collapsed points
         # file = open("/home/louis/collapses_history")
