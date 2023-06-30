@@ -8,6 +8,7 @@ vtk_add_test_cxx(vtkIOGeometryCxxTests tests
   TestOBJReaderComments.cxx,NO_VALID
   TestOBJReaderGroups.cxx,NO_VALID
   TestOBJReaderMaterials.cxx,NO_VALID
+  TestOBJReaderMultiline.cxx,NO_VALID
   TestOBJReaderMultiTexture.cxx,NO_VALID
   TestOBJWriterMultiTexture.cxx,NO_VALID
   TestOBJReaderNormalsTCoords.cxx,NO_VALID
@@ -97,6 +98,10 @@ vtk_add_test_cxx(vtkIOGeometryCxxTests tests
 )
 
 vtk_add_test_cxx(vtkIOGeometryCxxTests tests
+  TestGLTFReaderGeometryNoBin,TestGLTFReaderGeometryNoBin.cxx DATA{../Data/glTF/Triangle/IncorrectDataNoBinFile.gltf} NO_VALID NO_OUTPUT
+)
+
+vtk_add_test_cxx(vtkIOGeometryCxxTests tests
   TestGLTFReaderEmbeddedGeometry,TestGLTFReaderGeometry.cxx DATA{../Data/glTF/Triangle/EmbeddedTriangle.gltf}
 )
 
@@ -106,6 +111,10 @@ vtk_add_test_cxx(vtkIOGeometryCxxTests tests
 
 vtk_add_test_cxx(vtkIOGeometryCxxTests tests
   TestGLTFReaderAnimation,TestGLTFReaderAnimation.cxx 200 DATA{../Data/glTF/BoxAnimated/BoxAnimated.gltf,BoxAnimated0.bin}
+)
+
+vtk_add_test_cxx(vtkIOGeometryCxxTests tests
+  TestGLTFReaderAnimationRange,TestGLTFReaderAnimationRange.cxx 1.807 DATA{../Data/glTF/BoxAnimated/BoxAnimated.gltf,BoxAnimated0.bin}
 )
 
 vtk_add_test_cxx(vtkIOGeometryCxxTests tests

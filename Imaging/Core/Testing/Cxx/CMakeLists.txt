@@ -12,10 +12,13 @@ vtk_add_test_cxx(vtkImagingCoreCxxTests tests
   ImageInterpolateSlidingWindow2D.cxx
   ImageInterpolateSlidingWindow3D.cxx
   ImageInterpolator.cxx,NO_VALID,NO_DATA
+  ImagePassInformation.cxx,NO_VALID,NO_DATA
   ImageResize.cxx
   ImageResize3D.cxx
   ImageResizeCropping.cxx
   ImageReslice.cxx
+  ImageResliceDirection.cxx
+  ImageResliceOriented.cxx
   ImageWeightedSum.cxx,NO_VALID
   ImportExport.cxx,NO_VALID
   TestBSplineWarp.cxx

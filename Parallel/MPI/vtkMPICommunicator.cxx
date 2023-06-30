@@ -26,6 +26,7 @@
 #define VTK_CREATE(type, name) vtkSmartPointer<type> name = vtkSmartPointer<type>::New()
 
 #include <cassert>
+#include <type_traits> // for std::is_pointer
 #include <vector>
 
 VTK_ABI_NAMESPACE_BEGIN
@@ -42,7 +43,7 @@ static inline void vtkMPICommunicatorDebugBarrier(MPI_Comm* handle)
 #if (MPI_VERSION >= 4)
 // Flag to indicate "_c" versions of communication routines exist, like MPI_Send_c,
 // which use the 64bit type MPI_Count for length parameters.
-// #define VTKMPI_64BIT_LENGTH
+#define VTKMPI_64BIT_LENGTH
 #endif
 
 vtkStandardNewMacro(vtkMPICommunicator);
@@ -1133,6 +1134,14 @@ int vtkMPICommunicator::NoBlockSend(
 }
 
 //------------------------------------------------------------------------------
+int vtkMPICommunicator::NoBlockSend(const void* data, vtkTypeInt64 length, MPI_Datatype mpiType,
+  int remoteProcessId, int tag, Request& req)
+{
+  return CheckForMPIError(vtkMPICommunicatorNoBlockSendData(
+    data, length, remoteProcessId, tag, mpiType, req, this->MPIComm->Handle));
+}
+
+//------------------------------------------------------------------------------
 int vtkMPICommunicator::NoBlockReceive(
   int* data, int length, int remoteProcessId, int tag, Request& req)
 {
@@ -1799,6 +1808,10 @@ int vtkMPICommunicator::WaitAll(int count, Request requests[])
   }
 
   int rc = CheckForMPIError(MPI_Waitall(count, r, MPI_STATUSES_IGNORE));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return rc;
 }
@@ -1819,6 +1832,10 @@ int vtkMPICommunicator::WaitAny(int count, Request requests[], int& idx)
 
   int rc = CheckForMPIError(MPI_Waitany(count, r, &idx, MPI_STATUS_IGNORE));
   assert("post: index from MPI_Waitany is out-of-bounds!" && (idx >= 0) && (idx < count));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return (rc);
 }
@@ -1838,6 +1855,10 @@ int vtkMPICommunicator::WaitSome(int count, Request requests[], int& NCompleted,
   }
 
   int rc = CheckForMPIError(MPI_Waitsome(count, r, &NCompleted, completed, MPI_STATUSES_IGNORE));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return (rc);
 }
@@ -1858,6 +1879,10 @@ int vtkMPICommunicator::TestAll(int count, vtkMPICommunicator::Request requests[
   }
 
   int rc = CheckForMPIError(MPI_Testall(count, r, &flag, MPI_STATUSES_IGNORE));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return (rc);
 }
@@ -1879,6 +1904,10 @@ int vtkMPICommunicator::TestAny(
   }
 
   int rc = CheckForMPIError(MPI_Testany(count, r, &idx, &flag, MPI_STATUS_IGNORE));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return (rc);
 }
@@ -1899,6 +1928,10 @@ int vtkMPICommunicator::TestSome(int count, Request requests[], int& NCompleted,
   }
 
   int rc = CheckForMPIError(MPI_Testsome(count, r, &NCompleted, completed, MPI_STATUSES_IGNORE));
+  for (int i = 0; i < count; ++i)
+  {
+    requests[i].Req->Handle = r[i];
+  }
   delete[] r;
   return (rc);
 }

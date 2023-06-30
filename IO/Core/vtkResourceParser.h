@@ -21,6 +21,7 @@ PURPOSE.  See the above copyright notice for more information.
 #include "vtkSmartPointer.h"   // For vtkSmartPointer
 
 #include <array>       // for std::array
+#include <cstdint>     // for std::int32_t
 #include <cstdlib>     // for std::size_t
 #include <functional>  // for std::function
 #include <limits>      // for std::numeric_limits
@@ -103,7 +104,7 @@ private:
   /**
    * @brief Class for parser context, serves as a bridge between public API and real implementation
    */
-  class vtkParserContext
+  class VTKIOCORE_EXPORT vtkParserContext
   {
   public:
     vtkParserContext();

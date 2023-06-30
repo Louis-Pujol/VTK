@@ -37,6 +37,7 @@
 #define vtkMPICommunicator_h
 
 #include "vtkCommunicator.h"
+#include "vtkMPI.h"               // for MPI_Datatype
 #include "vtkParallelMPIModule.h" // For export macro
 
 VTK_ABI_NAMESPACE_BEGIN
@@ -135,6 +136,12 @@ public:
   int NoBlockSend(
     const vtkTypeInt64* data, vtkTypeInt64 length, int remoteProcessId, int tag, Request& req);
   ///@}
+
+  /**
+   * Variant that permits dynamic type sends, like those create by MPI_Type_create_subarray
+   */
+  int NoBlockSend(const void* data, vtkTypeInt64 length, MPI_Datatype mpiType, int remoteProcessId,
+    int tag, Request& req);
 
   ///@{
   /**
