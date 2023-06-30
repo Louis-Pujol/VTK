@@ -89,10 +89,21 @@ vtkQuadricDecimation::vtkQuadricDecimation()
 
   this->ActualReduction = 0.0;
 
+  // Arrays to store the decimation history
   this->SuccessiveCollapses = vtkIntArray::New();
   this->SuccessiveCollapses->SetNumberOfComponents(2);
   this->NewPoints = vtkDoubleArray::New();
   this->NewPoints->SetNumberOfComponents(3);
+
+  // Arrays to inspect the execution
+  this->InitialPolys = vtkCellArray::New();
+  this->InitialPoints = vtkPoints::New();
+  this->InitialEdges = vtkIntArray::New();
+  this->InitialEdges->SetNumberOfComponents(2);
+  this->InitialEdgeCosts = vtkDoubleArray::New();
+  this->InitialEdgeCosts->SetNumberOfComponents(1);
+  this->InitialTargetPoints = vtkDoubleArray::New();
+  this->InitialQuadrics = vtkDoubleArray::New();
 }
 
 //------------------------------------------------------------------------------
@@ -103,6 +114,18 @@ vtkQuadricDecimation::~vtkQuadricDecimation()
   this->EndPoint1List->Delete();
   this->EndPoint2List->Delete();
   this->TargetPoints->Delete();
+
+  // Additions to the original code
+  this->SuccessiveCollapses->Delete();
+  this->NewPoints->Delete();
+
+  // Arrays to inspect the execution
+  this->InitialPolys->Delete();
+  this->InitialPoints->Delete();
+  this->InitialEdges->Delete();
+  this->InitialEdgeCosts->Delete();
+  this->InitialTargetPoints->Delete();
+  this->InitialQuadrics->Delete();
 }
 
 void vtkQuadricDecimation::SetPointAttributeArray(vtkIdType ptId, const double* x)
@@ -292,6 +315,9 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   this->Mesh->BuildCells();
   this->Mesh->BuildLinks();
 
+  this->InitialPoints->DeepCopy(this->Mesh->GetPoints());
+  this->InitialPolys->DeepCopy(this->Mesh->GetPolys());
+
   this->ErrorQuadrics = new vtkQuadricDecimation::ErrorQuadric[numPts];
   if (this->VolumePreservation)
   {
@@ -319,8 +345,12 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
         // and EndPoint2List (the 2 endpoints to different lists).
         edgeId = this->Edges->GetNumberOfEdges();
         this->Edges->InsertEdge(pts[j], pts[(j + 1) % 3], edgeId);
+        // this->InitialEdges->InsertEdge(pts[j], pts[(j + 1) % 3], edgeId);
         this->EndPoint1List->InsertId(edgeId, pts[j]);
         this->EndPoint2List->InsertId(edgeId, pts[(j + 1) % 3]);
+
+        this->InitialEdges->InsertNextValue(pts[j]);
+        this->InitialEdges->InsertNextValue(pts[(j + 1) % 3]);
       }
     }
   }
@@ -353,6 +383,12 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
   this->AddBoundaryConstraints();
   this->UpdateProgress(0.15);
 
+  this->InitialQuadrics->SetNumberOfComponents(11 + 4 * this->NumberOfComponents);
+  for (i = 0; i < numPts; i++)
+  {
+    this->InitialQuadrics->InsertNextTuple(this->ErrorQuadrics[i].Quadric);
+  }
+
   vtkDebugMacro(<< "Computing Costs");
   // Compute the cost of and target point for collapsing each edge.
   for (i = 0; i < this->Edges->GetNumberOfEdges(); i++)
@@ -366,8 +402,10 @@ int vtkQuadricDecimation::RequestData(vtkInformation* vtkNotUsed(request),
       cost = this->ComputeCost(i, x);
     }
     this->EdgeCosts->Insert(cost, i);
+    this->InitialEdgeCosts->InsertNextValue(cost);
     this->TargetPoints->InsertTuple(i, x);
   }
+  this->InitialTargetPoints->DeepCopy(this->TargetPoints);
   this->UpdateProgress(0.20);
 
   // Okay collapse edges until desired reduction is reached
@@ -530,7 +568,7 @@ void vtkQuadricDecimation::InitializeQuadrics(vtkIdType numPts)
       tempP2[i] = point2[i] - point0[i];
     }
     vtkMath::Cross(tempP1, tempP2, n);
-    triArea2 = vtkMath::Normalize(n);
+    triArea2 = vtkMath::Normalize(n); // Normalize inplace and return the norm
     // triArea2 = (triArea2 * triArea2 * 0.25);
     triArea2 = triArea2 * 0.5;
     // I am unsure whether this should be squared or not??

@@ -158,10 +158,16 @@ public:
 
   ///@{
   /**
-   * Getter/Setter for mapping point data to the output during decimation.
+   * Getter/Setter for collapses history.
    */
   vtkGetMacro(SuccessiveCollapses, vtkIntArray*);
   vtkGetMacro(NewPoints, vtkDoubleArray*);
+  vtkGetMacro(InitialPolys, vtkCellArray*);
+  vtkGetMacro(InitialPoints, vtkPoints*);
+  vtkGetMacro(InitialEdges, vtkIntArray*);
+  vtkGetMacro(InitialEdgeCosts, vtkDoubleArray*);
+  vtkGetMacro(InitialTargetPoints, vtkDoubleArray*);
+  vtkGetMacro(InitialQuadrics, vtkDoubleArray*);
   ///@}
 
   ///@{
@@ -321,8 +327,16 @@ protected:
   int NumberOfComponents;
   vtkPolyData* Mesh;
 
+  // Additions to the vtk code  
   vtkIntArray* SuccessiveCollapses;
   vtkDoubleArray* NewPoints;
+  vtkCellArray* InitialPolys;
+  vtkPoints* InitialPoints;
+  vtkIntArray* InitialEdges;
+  vtkDoubleArray* InitialEdgeCosts;
+  vtkDoubleArray* InitialTargetPoints;
+  vtkDoubleArray* InitialQuadrics;
+
 
   struct ErrorQuadric
   {
